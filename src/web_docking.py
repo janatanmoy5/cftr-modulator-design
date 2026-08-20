@@ -49,12 +49,12 @@ def dock_smiles(root: Path, smiles: str, job_id: str, progress=lambda message: N
     def one(site, receptor, center):
         out = job_dir / "poses" / site; out.mkdir(parents=True, exist_ok=True)
         result = docking.dock_one_binary(vina, receptor, ligand, center,
-                                         docking.BOX_SIZE_A, out, 1)
+                                         docking.BOX_SIZE_A, out, 4)
         return {**result, "binding_site": site, "receptor_used": receptor.name,
                 "pose_file": str((out / f"{job_id}_docked.pdbqt").relative_to(root))}
 
     rows = []
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with ThreadPoolExecutor(max_workers=min(5, len(tasks))) as pool:
         futures = {pool.submit(one, *task): task[0] for task in tasks}
         for future in as_completed(futures): rows.append(future.result())
     rows.sort(key=lambda row: float(row["best_affinity_kcal_mol"]))
@@ -80,6 +80,7 @@ def dock_smiles(root: Path, smiles: str, job_id: str, progress=lambda message: N
         "best_pose_pdbqt": str(best_pose.relative_to(root)),
         "complex_pdb": str(complex_pdb.relative_to(root)),
         "complex_png": str(png.relative_to(root)) if rendered else None,
+        "result_json": str((job_dir / "result.json").relative_to(root)),
         "warning": "Docking is a computational hypothesis and requires pose review and experimental confirmation.",
     }
     (job_dir / "result.json").write_text(json.dumps(result, indent=2))
