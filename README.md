@@ -29,6 +29,7 @@ the interactive molecule designer after the models have been generated:
 
 Then open [http://127.0.0.1:8765](http://127.0.0.1:8765). Initial startup can
 take about one minute while the models and training fingerprints are loaded.
+Tool is accessible at https://cftr-modulator-design.onrender.com/
 
 ## What the project does
 
@@ -141,6 +142,7 @@ the full pipeline or the `--skip-docking` command above, then launch:
 ```
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
+Open https://cftr-modulator-design.onrender.com/
 
 The app supports molecule drawing through JSME and accepts direct SMILES,
 ChEMBL molecule IDs (for example `CHEMBL25`), PubChem CIDs (for example
