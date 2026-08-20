@@ -1,0 +1,15 @@
+mutation,functional_class,notes
+F508del,II,Most common CF allele; NBD1 misfolding; corrector-responsive
+G551D,III,Signature motif gating mutation; index mutation for ivacaftor
+G178R,III,Gating mutation; ivacaftor-responsive per label
+S549N,III,Gating mutation; NBD1 signature motif region
+R117H,IV,Conductance mutation; ivacaftor-responsive (with 5T/7T modifier)
+N1303K,II,Severe NBD2 misfolding; historically poor modulator response
+W1282X,I,Premature stop codon (nonsense); no protein made
+G542X,I,Premature stop codon (nonsense); no protein made
+R553X,I,Premature stop codon (nonsense); no protein made
+621+1G->T,I,Canonical splice-site mutation; no functional protein
+3849+10kbC->T,V,Splicing mutation; reduced normal transcript
+A455E,II/V,Mild processing mutation; residual function retained
+R560T,II,NBD1 processing mutation near signature motif
+D1152H,IV,Conductance mutation; ivacaftor-responsive per label

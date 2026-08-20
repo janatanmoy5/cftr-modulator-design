@@ -1,0 +1,26 @@
+{
+  "ivacaftor": {
+    "smiles": null,
+    "molecular_formula": "C24H28N2O3"
+  },
+  "lumacaftor": {
+    "smiles": null,
+    "molecular_formula": "C24H18F2N2O5"
+  },
+  "tezacaftor": {
+    "smiles": null,
+    "molecular_formula": "C26H27F3N2O6"
+  },
+  "elexacaftor": {
+    "smiles": null,
+    "molecular_formula": "C26H34F3N7O4S"
+  },
+  "vanzacaftor": {
+    "smiles": null,
+    "molecular_formula": "C32H39N7O4S"
+  },
+  "deutivacaftor": {
+    "smiles": null,
+    "molecular_formula": "C24H28N2O3"
+  }
+}
