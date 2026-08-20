@@ -77,7 +77,7 @@ def find_vina_binary(project_root: Path) -> Path | None:
 
 def dock_one_binary(vina_bin: Path, receptor: Path, ligand: Path, center: tuple,
                      box_size: tuple, out_dir: Path, exhaustiveness: int,
-                     cpu: int | None = None) -> dict:
+                     cpu: int | None = None, num_modes: int = 9) -> dict:
     out_path = out_dir / f"{ligand.stem}_docked.pdbqt"
     log_path = out_dir / f"{ligand.stem}_log.txt"
     cmd = [
@@ -87,7 +87,7 @@ def dock_one_binary(vina_bin: Path, receptor: Path, ligand: Path, center: tuple,
         "--center_x", str(center[0]), "--center_y", str(center[1]), "--center_z", str(center[2]),
         "--size_x", str(box_size[0]), "--size_y", str(box_size[1]), "--size_z", str(box_size[2]),
         "--exhaustiveness", str(exhaustiveness),
-        "--num_modes", "9",
+        "--num_modes", str(max(1, num_modes)),
         "--out", str(out_path),
     ]
     if cpu is not None:
