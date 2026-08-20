@@ -1,0 +1,62 @@
+cftr-modulator-design v0.8.0
+Fixed 2026-08-19: Meeko multi-fragment ligand crash. ChEMBL salts and
+counterions are standardized to the largest heavy-atom parent for PDBQT
+generation, and individual preparation failures no longer abort the run.
+Added 2026-08-19: canonical fullpipeline.sh covering all data, QSAR, docking,
+classification, regression, optional external-library virtual screening,
+ranking, plots, manifest, and timestamped failure-aware logging.
+Added 2026-08-19: authoritative ChEMBL target mapping (direct CFTR CHEMBL4051,
+CFTR-GOPC PPI CHEMBL3885559, reference document CHEMBL5523680) with retained
+mutation/mechanism assay context.
+Added 2026-08-19: candidate-only virtual screening via screen_library.sh,
+including library validation, RDKit/Morgan features, 3D/PDBQT preparation,
+per-pocket CFTR docking, QSAR inference, druggability filters, and ranked hits.
+Clarified 2026-08-19: primary objective is novel CFTR small-molecule discovery;
+approved modulators are reference controls and branded combinations are not
+the main prediction target. Mutation response is a secondary analysis.
+Added 2026-08-19: one-click run_all.sh / RUN_ALL.command orchestration and an
+HTML results dashboard with model, docking, validation, and lead-ranking plots.
+Added 2026-08-19: paired CFTR activity classification and potency regression,
+scaffold-aware cross-validation, docking-aware features, developability scoring,
+and transparent ranked-lead output (steps 14-15).
+Branch A (mutation response):  fetch -> sequence features -> structural features -> ligand features -> dataset build -> train -> predict
+Branch B (bioactivity QSAR):   fetch ChEMBL -> featurize (RDKit + Morgan FP) -> train/compare regressors
+Branch C (structural docking): fetch CIF -> per-site binding-pocket extraction (ABP1/ABP2 + potentiator/elexacaftor/corrector) -> per-site receptor+ligand PDBQT prep -> AutoDock Vina docking
+
+Fixed 2026-08-19 (6th pass, breaking issues found via real user run):
+  1. pipeline.sh ordering bug: 02_extract_sequence_features.py required cf_mutations.csv,
+     which was previously only created by 05_build_mutation_dataset.py -- but pipeline.sh
+     runs 02 before 05. Fixed by moving the seed-mutation logic (SEED_MUTATIONS, KNOWN_LABELS,
+     seeding function) into utils.py as ensure_mutations_seeded(), called by 02 on first run.
+     05 now finds the file already seeded and proceeds straight to building the dataset --
+     the full pipeline (01-06) now completes in ONE run from a clean checkout, verified.
+  2. Stale config key crash: 02, 03, and 07 still referenced cfg["key_sites"]["ATP_site_NBD1"]
+     and ["ATP_site_NBD2"], which were removed when ABP1/ABP2 were added. Added
+     utils.atp_pocket_residues() to flatten the corrected ABP1/ABP2 structure into simple
+     residue lists; all three scripts updated to use it. Renamed the derived feature columns
+     accordingly: dist_to_nearest_ATP_site -> dist_to_nearest_ATP_pocket,
+     in_NBD1_ATP_motif/in_NBD2_ATP_motif -> in_ABP1_degenerate_pocket/in_ABP2_hydrolytic_pocket
+     (06 and 07 updated to match).
+  3. AlphaFold model 404: hardcoded "_v4" URL broke when AlphaFold DB moved to v6.
+     01_fetch_cftr_data.py now resolves the current model URL dynamically via the AlphaFold
+     Prediction API (https://alphafold.ebi.ac.uk/api/prediction/P13569) and saves it locally
+     under a version-independent filename (AF-P13569-F1-model_latest.{cif,pdb}); falls back to
+     a guessed v6 URL if the API itself is unreachable. All downstream scripts (03, 11, 12, 13)
+     updated to reference the fixed filename instead of a hardcoded version number.
+  Full pipeline (01->07) re-validated end-to-end after all three fixes.
+
+Fixed 2026-08-19 (5th pass): pipeline.sh 'EXTRA_ARGS[@]: unbound variable' crash on macOS's
+default bash 3.2 (Apple ships an old bash; expanding an empty array under `set -u` throws
+unbound-variable before bash 4.4). Guarded with an explicit length check before expansion.
+Added 2026-08-19 (4th pass): 13_run_docking.py supports two docking backends, auto-selected:
+static bin/vina binary (preferred) or the installed `vina` Python package (fallback).
+Fixed 2026-08-19 (3rd pass): install.sh downloads the static, precompiled AutoDock Vina binary
+by default (no Boost/SWIG/compiling). Plain venv (conda no longer required for this).
+Added 2026-08-19: CFTR interactome (UniProt P13569 Interaction/Subunit section, 16 partners)
+with PPI-modulator-candidate flags (GOPC, AHCYL1, MARCHF2, NHERF1) -- bridges to the
+PPI-IC50pred framework (rs-10659504).
+Corrected 2026-08-19: ABP1 (noncanonical/degenerate) vs ABP2 (canonical/hydrolytic) ATP
+pockets; corrector pocket updated to real cryo-EM-resolved TMD1 site (7SVR/7SV7).
+
+Target protein: CFTR / P13569 (UniProt)
+Build date: 2026-08-18

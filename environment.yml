@@ -1,0 +1,26 @@
+name: cftr-modulator-design
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scikit-learn
+  - joblib
+  - pyyaml
+  - requests
+  - biopython
+  - rdkit
+  - scipy
+  - gemmi
+  - matplotlib
+  - seaborn
+  - jupyter
+  - pip
+  - pip:
+    - meeko
+# NOTE: AutoDock Vina itself is NOT a Python dependency here. install.sh
+# downloads the static Vina binary (no compiling) into bin/vina, and
+# 13_run_docking.py calls it via subprocess. This conda env file is
+# provided as an alternative to install.sh's venv for people who prefer
+# conda, but doesn't need vina/boost/swig either way.

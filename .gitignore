@@ -1,0 +1,45 @@
+# Python environments and caches
+.venv/
+venv/
+.conda/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Editors and operating-system metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Downloaded/generated scientific data (keep directory placeholders)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/structures/*
+!data/structures/.gitkeep
+
+# Trained models and generated analyses
+models/*
+!models/.gitkeep
+!models/README.md
+results/*
+!results/.gitkeep
+!results/README.md
+
+# Downloaded AutoDock Vina executable
+bin/*
+!bin/.gitkeep
+
+# Runtime files
+*.log
+*.pid
+.env
+.env.*
+!.env.example

@@ -1,0 +1,426 @@
+# =============================================================================
+# CFTR Modulator Response Prediction Pipeline - Central Configuration
+# =============================================================================
+project:
+  name: "cftr-modulator-design"
+  version: "0.8.0"
+  primary_objective: "discover and prioritize novel CFTR-modulating small molecules"
+  reference_modulators_only: true
+  mutation_response_role: "secondary translational analysis"
+  target_protein: "CFTR"
+  uniprot_id: "P13569"
+  uniprot_fasta_url: "https://rest.uniprot.org/uniprotkb/P13569.fasta"
+  uniprot_json_url: "https://rest.uniprot.org/uniprotkb/P13569.json"
+  protein_length_aa: 1480
+
+chembl:
+  primary_target_chembl_id: "CHEMBL4051"
+  primary_target_type: "SINGLE PROTEIN"
+  primary_target_name: "Cystic fibrosis transmembrane conductance regulator"
+  primary_target_uniprot: "P13569"
+  reference_document_chembl_id: "CHEMBL5523680"
+  reference_document_doi: "10.1016/j.ejmech.2023.116120"
+  ppi_target_chembl_id: "CHEMBL3885559"
+  ppi_target_name: "CFTR/GOPC protein-protein interaction"
+  ppi_target_role: "separate exploratory PPI screening track; do not pool with direct CFTR activities"
+  assay_context_policy: >
+    Retain mutation and assay context. Do not interpret pooled EC50 values
+    across wild-type, F508del, G551D, N1303K, and W1282X as one homogeneous
+    endpoint without an explicit context model.
+
+# -----------------------------------------------------------------------------
+# Reference structures. CFTR has no single high-resolution full-length
+# crystal structure; the pipeline uses a mix of full-length cryo-EM models
+# and isolated-domain crystal structures, plus an AlphaFold full-length model
+# for continuous per-residue features (pLDDT, coordinates) where cryo-EM
+# density is missing (notably residues 1-14, 645-843 R-domain, 1173-1206,
+# 1437-1480).
+# -----------------------------------------------------------------------------
+structures:
+  full_length_cryo_em:
+    - id: "5UAK"
+      description: "Human CFTR, dephosphorylated, ATP-free (Zhang & Chen 2016)"
+    - id: "6MSM"
+      description: "Human CFTR, phosphorylated, ATP-bound"
+    - id: "8EIQ"
+      description: "Phosphorylated deltaF508-CFTR bound to Trikafta (elexacaftor/tezacaftor/ivacaftor) + ATP/Mg -- docking reference for the potentiator (TM4/TM5/TM8) and elexacaftor sites"
+      use_for_docking: true
+    - id: "7SVR"
+      description: "Dephosphorylated CFTR bound to lumacaftor (VX-809) -- PRIMARY docking reference for corrector_site_TMD1_type1 (real resolved corrector pocket, not a prediction)"
+      use_for_docking: true
+    - id: "7SV7"
+      description: "Phosphorylated CFTR + ATP/Mg bound to tezacaftor (VX-661) -- alternate corrector docking reference"
+      use_for_docking: true
+  isolated_domains:
+    - id: "5TF7"
+      chain_region: "NBD1"
+      residue_range: [387, 646]
+    - id: "3GD7"
+      chain_region: "NBD2"
+      residue_range: [1193, 1427]
+    - id: "6UK1"
+      chain_region: "NBD2"
+      residue_range: [1210, 1480]
+    - id: "1R10"
+      chain_region: "NBD1_ATP_bound"
+      residue_range: [389, 678]
+  # File format: mmCIF is the modern PDB archive format (PDB-format files
+  # are being phased out by RCSB for large/complex structures, and mmCIF
+  # carries richer metadata -- e.g. HETATM/ligand chemical component
+  # dictionaries needed to locate bound-ligand coordinates directly). All
+  # structures above are fetched as .cif; 01_fetch_cftr_data.py also pulls
+  # the legacy .pdb as a fallback for tools that don't read mmCIF.
+  file_format: "cif"
+  # AlphaFold model URL is resolved DYNAMICALLY at fetch time via this API
+  # endpoint (see 01_fetch_cftr_data.py fetch_alphafold_model()), not a
+  # hardcoded version-specific URL -- AlphaFold DB has moved through
+  # several major versions (v4 -> v6 as of 2026) and a hardcoded "_v4"
+  # suffix eventually 404s. Whatever version is current gets saved locally
+  # as AF-P13569-F1-model_latest.{cif,pdb} -- that fixed local filename is
+  # what every other script in this pipeline references.
+  alphafold_api_url: "https://alphafold.ebi.ac.uk/api/prediction/P13569"
+  alphafold_local_filename_stem: "AF-P13569-F1-model_latest"
+
+# -----------------------------------------------------------------------------
+# Experimentally/mutagenesis-defined ligand binding sites (NOT the generic
+# ATP-sandwich sites already listed under key_sites below). These residue
+# lists come directly from published cryo-EM + alanine-scanning studies and
+# are what 11_extract_binding_pockets.py uses to define the docking box /
+# compute real binding-pocket geometry, replacing the earlier
+# distance-to-ATP-site proxy with the actual modulator pocket.
+# -----------------------------------------------------------------------------
+binding_sites:
+  potentiator_site_TM4_TM5_TM8:
+    description: >
+      Ivacaftor / GLPG1837 potentiator pocket at the TM4-TM5-TM8 hinge,
+      protein-lipid interface. Liu et al. 2019 Science (PDB 6O2P); Yeh et
+      al. 2019 JGP alanine-scanning; Fiedorczuk & Chen 2022 Cell (8EIQ).
+    residues:
+      - {resnum: 229, chain_region: "TM4", note: "F229, hydrophobic cradle"}
+      - {resnum: 236, chain_region: "TM4", note: "F236, pi-pi with ivacaftor/elexacaftor bridging"}
+      - {resnum: 304, chain_region: "TM5", note: "Y304, H-bond to TM8 hinge backbone, critical for recognition"}
+      - {resnum: 308, chain_region: "TM5", note: "S308, most critical polar contact for ivacaftor/GLPG1837"}
+      - {resnum: 312, chain_region: "TM5", note: "F312, pi-pi stacking"}
+      - {resnum: 931,  chain_region: "TM8", note: "F931, hydrophobic cradle, TM8 hinge"}
+      - {resnum: 361,  chain_region: "TM6", note: "W361, ivacaftor bridge to F236 (Trikafta cryo-EM)"}
+    reference_ligand: "ivacaftor"
+    reference_pdb: "8EIQ"
+  elexacaftor_site_TMD_lasso:
+    description: >
+      Elexacaftor (dual corrector/potentiator) site linking the lasso motif
+      to TM10/TM11, distinct from the TM4/5/8 potentiator pocket (Fiedorczuk
+      & Chen 2022 Cell, Trikafta cryo-EM structure).
+    residues:
+      - {resnum: 18,   chain_region: "lasso_motif", note: "S18"}
+      - {resnum: 1032, chain_region: "TM10", note: "Y1032"}
+      - {resnum: 1098, chain_region: "TM11", note: "W1098"}
+      - {resnum: 1102, chain_region: "TM11", note: "R1102"}
+    reference_ligand: "elexacaftor"
+    reference_pdb: "8EIQ"
+  corrector_site_TMD1_type1:
+    description: >
+      Real cryo-EM-resolved binding site for type I correctors (lumacaftor,
+      tezacaftor), superseding the earlier F508-proximal NBD1 guess in this
+      config. Fiedorczuk & Chen 2022 Cell (PDB 7SVR: CFTR-lumacaftor;
+      7SV7: CFTR-tezacaftor+ATP/Mg) show both drugs insert into a
+      hydrophobic pocket in TMD1 formed by TM1, TM2, TM3, and TM6, linking
+      together four thermodynamically-unstable helices and stabilizing
+      TMD1 during early co-translational folding -- this is a real
+      resolved pocket, not a docking prediction. Independently, Molinski/
+      Bongiorno mutation-mapping + docking work (biorxiv 242073) converged
+      on the same region and additionally flagged K166 (ICL1) as important
+      for corrector recognition.
+    residues:
+      - {resnum: 68,  chain_region: "TM1", note: "K68, salt bridge with lumacaftor"}
+      - {resnum: 70,  chain_region: "TM1", note: "contact residue (70-74 region)"}
+      - {resnum: 71,  chain_region: "TM1", note: "contact residue (70-74 region)"}
+      - {resnum: 72,  chain_region: "TM1", note: "contact residue (70-74 region)"}
+      - {resnum: 73,  chain_region: "TM1", note: "contact residue (70-74 region)"}
+      - {resnum: 74,  chain_region: "TM1", note: "contact residue (70-74 region)"}
+      - {resnum: 166, chain_region: "ICL1", note: "K166, flagged important for corrector recognition (Molinski/Bongiorno)"}
+      - {resnum: 194, chain_region: "TM3", note: "G194, BCC-headgroup pocket wall"}
+      - {resnum: 195, chain_region: "TM3", note: "L195, BCC-headgroup pocket wall"}
+      - {resnum: 198, chain_region: "TM3", note: "A198, BCC-headgroup pocket wall"}
+      - {resnum: 365, chain_region: "TM6", note: "L365, pocket contact"}
+      - {resnum: 368, chain_region: "TM6", note: "I368, pocket contact"}
+      - {resnum: 374, chain_region: "TM3-TM4_region", note: "F374, essential for correction (mutation abolishes VX-809 rescue)"}
+      - {resnum: 375, chain_region: "TM3-TM4_region", note: "L375, essential for correction"}
+    reference_ligand: "lumacaftor"
+    reference_pdb: "7SVR"
+    reference_pdb_alt: "7SV7"
+    confidence: "high -- directly resolved by cryo-EM, not a docking prediction"
+
+# -----------------------------------------------------------------------------
+# Domain boundaries (approximate, from Riordan et al. 1989 / GeneCards /
+# Johns Hopkins CF Center domain schematic). Used to annotate mutations
+# with structural/functional context.
+# -----------------------------------------------------------------------------
+domains:
+  - name: "TMD1"
+    range: [1, 388]
+    description: "Transmembrane domain 1 (6 membrane-spanning helices)"
+  - name: "NBD1"
+    range: [389, 678]
+    description: "Nucleotide-binding domain 1 (Walker A/B, signature motif)"
+  - name: "R-domain"
+    range: [679, 843]
+    description: "Regulatory domain, PKA/PKC phosphorylation sites"
+  - name: "TMD2"
+    range: [844, 1172]
+    description: "Transmembrane domain 2 (6 membrane-spanning helices)"
+  - name: "NBD2"
+    range: [1173, 1480]
+    description: "Nucleotide-binding domain 2 (Walker A/B, signature motif)"
+
+key_sites:
+  F508:
+    residue: 508
+    domain: "NBD1"
+    note: "Most common CF mutation (F508del); NBD1-TMD interface; primary corrector target"
+  G551D:
+    residue: 551
+    domain: "NBD1"
+    note: "Gating mutation in NBD1 signature motif contributed to ABP2 (canonical pocket, see atp_binding_pockets below); index mutation for ivacaftor approval"
+
+# -----------------------------------------------------------------------------
+# ATP-binding pockets (ABPs), corrected 2026-08-19. CFTR's two NBDs
+# dimerize head-to-tail, forming two COMPOSITE and functionally DISTINCT
+# ATP pockets -- each built from one NBD's Walker A/B and the OTHER NBD's
+# signature motif. Earlier revisions of this config treated "NBD1 ATP
+# site" and "NBD2 ATP site" as two independent, symmetric sites; that was
+# wrong. The corrected picture:
+# -----------------------------------------------------------------------------
+atp_binding_pockets:
+  ABP1_noncanonical_degenerate:
+    description: >
+      Formed by Walker A + Walker B of NBD1 paired with the signature
+      motif of NBD2. Non-hydrolytic / catalytically degenerate: the
+      canonical Walker B catalytic glutamate is replaced (-> Ser573), the
+      H-loop active-site histidine is replaced (-> Ser605), and the NBD2
+      signature motif carries substitutions relative to the consensus
+      LSGGQ (Gly->His1348, Gln->His1350). Binds ATP with high affinity but
+      essentially does not hydrolyze it -- ATP stays bound long-term at
+      this site, thought to help set the channel's slow gating rhythm
+      rather than drive closure.
+    degenerate_markers:
+      - {resnum: 573,  role: "Walker B catalytic Glu -> Ser (non-hydrolytic)", domain: "NBD1"}
+      - {resnum: 605,  role: "H-loop active His -> Ser", domain: "NBD1"}
+      - {resnum: 1348, role: "NBD2 signature motif Gly -> His", domain: "NBD2"}
+      - {resnum: 1350, role: "NBD2 signature motif Gln -> His", domain: "NBD2"}
+    hydrolytic: false
+    binding_affinity: "high"
+  ABP2_canonical_hydrolytic:
+    description: >
+      Formed by Walker A + Walker B of NBD2 paired with the signature
+      motif of NBD1 (which includes the critical G551 residue). Contains
+      the full canonical A-loop/Q-loop/Walker A/Walker B/H-loop/D-loop
+      element set and is responsible for the ATP hydrolysis event that
+      drives channel closure. G551D disrupts this pocket directly and
+      causes severe CF (it is in the NBD1 signature motif contributed
+      here, not in NBD2). W401 (NBD1) ring-stacks with the adenine ring
+      of the ATP bound at this site.
+    nbd1_signature_motif_residues:
+      - {resnum: 547, role: "signature motif T547"}
+      - {resnum: 549, role: "signature motif S549"}
+      - {resnum: 551, role: "signature motif G551 -- G551D abolishes hydrolytic pocket function"}
+    nbd1_ring_stack_residue: {resnum: 401, role: "W401, adenine ring-ring stacking"}
+    nbd2_walker_A_residues: [1247, 1248, 1250, 1251, 1252]
+    nbd2_qloop_residue: 1291
+    nbd2_walker_B_residues:
+      - {resnum: 1370, role: "D1370, MgATP coordination"}
+      - {resnum: 1371, role: "E1371, MgATP coordination (E1371Q is the classic hydrolysis-dead mutant used to trap CFTR structures for cryo-EM)"}
+    nbd2_adenine_stack_residue: {resnum: 1219, role: "Y1219, adenine ring coordination"}
+    hydrolytic: true
+    binding_affinity: "lower than ABP1, but catalytically competent"
+
+# -----------------------------------------------------------------------------
+# CFTR modulator drugs. SMILES are canonical structures for the active
+# moieties (public DrugBank / PubChem structures). MW/logP etc. are computed
+# at runtime via RDKit in 04_extract_ligand_features.py; do not hardcode here.
+# -----------------------------------------------------------------------------
+# NOTE: SMILES are NOT hardcoded here. 04_extract_ligand_features.py fetches
+# each compound's canonical SMILES live from the PubChem PUG-REST API by
+# name (with a local data/raw/ligands_cache.json cache), so structures stay
+# accurate and don't rely on a hand-typed/hallucinated string in this config.
+modulators:
+  - name: "ivacaftor"
+    brand: "Kalydeco"
+    class: "potentiator"
+    pubchem_name: "ivacaftor"
+    combo_products: ["Kalydeco (monotherapy)", "Symkevi", "Orkambi (co-formulated w/ lumacaftor)", "Kaftrio"]
+  - name: "lumacaftor"
+    brand: "part of Orkambi"
+    class: "corrector"
+    pubchem_name: "lumacaftor"
+    combo_products: ["Orkambi (lumacaftor/ivacaftor)"]
+  - name: "tezacaftor"
+    brand: "part of Symkevi / Kaftrio"
+    class: "corrector"
+    pubchem_name: "tezacaftor"
+    combo_products: ["Symkevi (tezacaftor/ivacaftor)", "Kaftrio (elexacaftor/tezacaftor/ivacaftor)"]
+  - name: "elexacaftor"
+    brand: "part of Kaftrio"
+    class: "corrector"
+    pubchem_name: "elexacaftor"
+    combo_products: ["Kaftrio (elexacaftor/tezacaftor/ivacaftor)"]
+  - name: "vanzacaftor"
+    brand: "part of Alyftrek"
+    class: "corrector"
+    pubchem_name: "vanzacaftor"
+    combo_products: ["Alyftrek (vanzacaftor/tezacaftor/deutivacaftor)"]
+  - name: "deutivacaftor"
+    brand: "part of Alyftrek"
+    class: "potentiator"
+    pubchem_name: "deutivacaftor"
+    combo_products: ["Alyftrek (vanzacaftor/tezacaftor/deutivacaftor)"]
+
+products:
+  - name: "Kalydeco"
+    components: ["ivacaftor"]
+  - name: "Orkambi"
+    components: ["lumacaftor", "ivacaftor"]
+  - name: "Symkevi"
+    components: ["tezacaftor", "ivacaftor"]
+  - name: "Kaftrio"
+    components: ["elexacaftor", "tezacaftor", "ivacaftor"]
+  - name: "Alyftrek"
+    components: ["vanzacaftor", "tezacaftor", "deutivacaftor"]
+
+# -----------------------------------------------------------------------------
+# CFTR mutation functional classes (Welsh & Smith 1993 classification,
+# still the standard framework used clinically):
+#   I    - no protein made (nonsense/frameshift)
+#   II   - protein made but misfolded / degraded (e.g. F508del) -> correctors
+#   III  - protein reaches membrane but gate won't open (e.g. G551D) -> potentiators
+#   IV   - protein reaches membrane, conductance reduced -> potentiators
+#   V    - reduced amount of normal protein (splicing) -> correctors/amplifiers
+#   VI   - protein unstable at membrane -> stabilizers
+# -----------------------------------------------------------------------------
+mutation_classes:
+  I:   { mechanism: "no functional protein synthesized", primary_modulator_class: "none (modulators largely ineffective)" }
+  II:  { mechanism: "misfolding, ER retention/degradation", primary_modulator_class: "corrector (+potentiator)" }
+  III: { mechanism: "defective channel gating", primary_modulator_class: "potentiator" }
+  IV:  { mechanism: "reduced conductance at membrane", primary_modulator_class: "potentiator" }
+  V:   { mechanism: "reduced quantity of normal protein", primary_modulator_class: "corrector / amplifier" }
+  VI:  { mechanism: "reduced protein stability at membrane", primary_modulator_class: "stabilizer" }
+
+# -----------------------------------------------------------------------------
+# CFTR interactome (UniProt P13569, "Interaction/Subunit" section).
+# CFTR itself is a monomer and does not require oligomerization for
+# channel activity, though it may form membrane oligomers (Ramjeesingh
+# et al. 2001, PMID 11524016). Partners below are grouped by whether they
+# are candidate PPI-modulator targets in their own right (a small molecule
+# that disrupts or stabilizes the interface, independent of CFTR's own
+# ATP/corrector/potentiator pockets) versus purely descriptive/regulatory
+# context. This is the natural bridge to the PPI-IC50pred framework
+# (Jana, Karmakar, Banerjee, Saha, Research Square rs-10659504) --
+# CFTR-partner interfaces are themselves PPIs with druggable potential,
+# distinct from the small-molecule pockets covered by binding_sites above.
+# -----------------------------------------------------------------------------
+interactome:
+  oligomeric_state:
+    monomer_sufficient_for_activity: true
+    may_form_membrane_oligomers: true
+    reference_pmid: 11524016
+  partners:
+    - partner: "SLC26A3"
+      interaction_type: "direct"
+      effect_on_cftr: "regulatory (anion exchanger coupling)"
+      evidence: "by similarity"
+      ppi_modulator_candidate: false
+    - partner: "SLC26A6"
+      interaction_type: "direct"
+      effect_on_cftr: "regulatory (anion exchanger coupling)"
+      evidence: "by similarity"
+      ppi_modulator_candidate: false
+    - partner: "SHANK2"
+      interaction_type: "direct"
+      effect_on_cftr: "scaffolding (postsynaptic density protein family, PDZ-mediated)"
+      evidence: "by similarity"
+      ppi_modulator_candidate: false
+    - partner: "NHERF1"
+      gene_alias: "SLC9A3R1"
+      interaction_type: "direct (PDZ-mediated)"
+      effect_on_cftr: "apical membrane scaffolding/retention; links CFTR to SLC4A7"
+      evidence_pmid: [11304524, 12403779, 15247260]
+      ppi_modulator_candidate: true
+      note: "PDZ-domain interface -- a well-precedented druggable PPI interaction class"
+    - partner: "MYO6"
+      interaction_type: "direct"
+      effect_on_cftr: "membrane trafficking/endocytosis"
+      evidence_pmid: [11304524, 12403779, 15247260]
+      ppi_modulator_candidate: false
+    - partner: "GOPC"
+      gene_alias: "PIST/CAL"
+      interaction_type: "direct, via CFTR C-terminus binding GOPC's PDZ domain"
+      effect_on_cftr: "promotes CFTR internalization, DECREASES channel activity"
+      evidence_pmid: [11707463, 16331976]
+      ppi_modulator_candidate: true
+      note: >
+        High-value PPI-modulator target: since GOPC binding reduces surface
+        CFTR, a small molecule that disrupts the CFTR(C-term)-GOPC(PDZ)
+        interface would be predicted to INCREASE CFTR surface density --
+        an amplifier-like mechanism distinct from correctors/potentiators/
+        stabilizers, and a plausible extension target for the PPI-IC50pred
+        methodology.
+    - partner: "SLC4A7"
+      interaction_type: "indirect, bridged through NHERF1"
+      effect_on_cftr: "bicarbonate transport coupling"
+      evidence_pmid: [12403779]
+      ppi_modulator_candidate: false
+    - partner: "MYO5B"
+      interaction_type: "complex (with RAB11A)"
+      effect_on_cftr: "recycling-endosome trafficking"
+      evidence_pmid: [17462998]
+      ppi_modulator_candidate: false
+    - partner: "RAB11A"
+      interaction_type: "complex (with MYO5B)"
+      effect_on_cftr: "recycling-endosome trafficking"
+      evidence_pmid: [17462998]
+      ppi_modulator_candidate: false
+    - partner: "ANO1"
+      gene_alias: "TMEM16A"
+      interaction_type: "direct"
+      effect_on_cftr: "CFTR inhibits ANO1 chloride channel activity (cross-talk between two Cl- channel families)"
+      evidence_pmid: [22178883]
+      ppi_modulator_candidate: false
+    - partner: "SLC26A8"
+      interaction_type: "direct"
+      effect_on_cftr: "anion exchanger coupling (testis-enriched)"
+      evidence_pmid: [22121115]
+      ppi_modulator_candidate: false
+    - partner: "AHCYL1"
+      interaction_type: "direct"
+      effect_on_cftr: "INCREASES CFTR activity"
+      evidence: "by similarity"
+      ppi_modulator_candidate: true
+      note: "Positive modulator of activity via PPI -- opposite-direction target from GOPC (stabilizing this interaction, rather than disrupting it, would be the therapeutic logic)"
+    - partner: "CSE1L"
+      interaction_type: "direct"
+      effect_on_cftr: "nuclear transport factor; functional role at CFTR less characterized"
+      evidence_pmid: [20933420]
+      ppi_modulator_candidate: false
+    - partner: "GORASP2"
+      gene_alias: "GRASP55"
+      interaction_type: "direct, via PDZ GRASP-type 1 domain, core-glycosylated CFTR only"
+      effect_on_cftr: "unconventional ER-stress-induced trafficking (bypasses Golgi)"
+      evidence_pmid: [21884936]
+      ppi_modulator_candidate: false
+    - partner: "MARCHF2"
+      interaction_type: "direct (E3 ubiquitin ligase)"
+      effect_on_cftr: "ubiquitination and degradation, DECREASES CFTR levels"
+      evidence_pmid: [23818989]
+      ppi_modulator_candidate: true
+      note: "Disrupting this interaction is the same therapeutic logic used for other CFTR-targeting E3 ligases; relevant to stabilizer-class modulator design (mutation class VI)"
+    - partner: "ADGRG2"
+      interaction_type: "direct"
+      effect_on_cftr: "adhesion GPCR implicated in CFTR-dependent fluid secretion (epididymis/vas deferens); ADGRG2 mutations linked to CBAVD"
+      evidence_pmid: [29393851]
+      ppi_modulator_candidate: false
+
+paths:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  structures_dir: "data/structures"
+  models_dir: "models"
+  results_dir: "results"
