@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Single-molecule, five-pocket CFTR docking service used by app.py."""
 import importlib.util
+import inspect
 import json
 import math
 import shutil
@@ -60,8 +61,13 @@ def dock_smiles(root: Path, smiles: str, job_id: str, progress=lambda message: N
     progress(f"Calculating binding energies for {len(tasks)} CFTR pockets (low-memory mode)")
     def one(site, receptor, center):
         out = job_dir / "poses" / site; out.mkdir(parents=True, exist_ok=True)
-        result = docking.dock_one_binary(vina, receptor, ligand, center,
-                                         docking.BOX_SIZE_A, out, 4, cpu=1)
+        dock_args = (vina, receptor, ligand, center, docking.BOX_SIZE_A, out, 4)
+        # Newer docking runners accept an explicit one-CPU limit. Continue to
+        # work with older deployed copies while pockets still run sequentially.
+        if "cpu" in inspect.signature(docking.dock_one_binary).parameters:
+            result = docking.dock_one_binary(*dock_args, cpu=1)
+        else:
+            result = docking.dock_one_binary(*dock_args)
         return {**result, "binding_site": site, "receptor_used": receptor.name,
                 "pose_file": str((out / f"{job_id}_docked.pdbqt").relative_to(root))}
 
