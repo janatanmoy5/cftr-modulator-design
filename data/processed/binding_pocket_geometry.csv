@@ -1,0 +1,6 @@
+n_resolved_residues,n_requested_residues,centroid_x,centroid_y,centroid_z,mean_hydrophobicity_kd,pocket_volume_A3,binding_area_A2,binding_site,reference_structure,reference_ligand
+7,7,160.22514,140.16714,154.59184,1.1714285714285713,2637.4093612197908,275.3698323695469,potentiator_site_TM4_TM5_TM8,8EIQ.cif,ivacaftor
+4,4,131.63574,158.26625,153.604,-1.875,524.2605091916287,73.76993621379944,elexacaftor_site_TMD_lasso,8EIQ.cif,elexacaftor
+14,14,147.7665,132.736,165.46115,1.0285714285714285,3661.2626565878913,403.16050983695453,corrector_site_TMD1_type1,7SVR.cif,lumacaftor
+4,4,153.84274,151.4325,92.669,-2.0,531.6415042452061,145.7645709854259,ABP1_noncanonical_degenerate,8EIQ.cif,
+12,12,137.67589,147.01016,97.87533,-1.4749999999999999,4255.098653903635,236.56128593041012,ABP2_canonical_hydrolytic,8EIQ.cif,
