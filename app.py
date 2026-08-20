@@ -11,16 +11,13 @@ import hashlib
 import importlib.util
 import json
 import math
-import re
+import mimetypes
 import threading
 import webbrowser
 import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from urllib.parse import urlparse
-from urllib.parse import quote
+from urllib.parse import parse_qs, unquote, urlparse
 
 import joblib
 import numpy as np
@@ -60,62 +57,8 @@ def model_frame(desc: dict, columns: list[str]) -> pd.DataFrame:
     return pd.DataFrame([{col: desc.get(col, np.nan) for col in columns}])
 
 
-def fetch_json(url: str) -> dict:
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": "CFTR-Molecule-Designer/1.0"})
-    try:
-        with urlopen(request, timeout=15) as response:
-            return json.loads(response.read())
-    except HTTPError as exc:
-        if exc.code == 404:
-            raise ValueError("Compound identifier or chemical name was not found") from exc
-        raise ValueError(f"Remote compound service returned HTTP {exc.code}") from exc
-    except (URLError, TimeoutError) as exc:
-        raise ValueError("Could not reach the ChEMBL/PubChem compound service") from exc
-
-
-def resolve_compound(query: str) -> tuple[str, str]:
-    value = query.strip()
-    if not value:
-        raise ValueError("Enter a SMILES, ChEMBL ID, PubChem CID, or chemical name")
-
-    # Prefer a valid local structure so normal SMILES prediction remains offline.
-    if Chem.MolFromSmiles(value) is not None:
-        return value, "SMILES"
-
-    if re.fullmatch(r"CHEMBL\d+", value, flags=re.IGNORECASE):
-        chembl_id = value.upper()
-        data = fetch_json(f"https://www.ebi.ac.uk/chembl/api/data/molecule/{chembl_id}.json")
-        smiles = (data.get("molecule_structures") or {}).get("canonical_smiles")
-        if not smiles:
-            raise ValueError(f"{chembl_id} has no canonical SMILES in ChEMBL")
-        return smiles, chembl_id
-
-    cid_match = re.fullmatch(r"(?:(?:PUBCHEM|CID)\s*:?\s*)?(\d+)", value, flags=re.IGNORECASE)
-    if cid_match:
-        cid = cid_match.group(1)
-        endpoint = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/SMILES/JSON"
-        source = f"PubChem CID {cid}"
-    else:
-        endpoint = ("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/" +
-                    quote(value, safe="") + "/property/SMILES/JSON")
-        source = f"PubChem name: {value}"
-
-    data = fetch_json(endpoint)
-    properties = data.get("PropertyTable", {}).get("Properties", [])
-    if not properties:
-        raise ValueError(f"No structure was returned for {value}")
-    record = properties[0]
-    smiles = next((record.get(key) for key in
-                   ("SMILES", "ConnectivitySMILES", "CanonicalSMILES", "IsomericSMILES")
-                   if record.get(key)), None)
-    if not smiles:
-        raise ValueError(f"No SMILES was returned for {value}")
-    return smiles, source
-
-
-def predict(query: str) -> dict:
-    smiles, resolved_from = resolve_compound(query)
-    mol = Chem.MolFromSmiles(smiles)
+def predict(smiles: str) -> dict:
+    mol = Chem.MolFromSmiles(smiles.strip())
     if mol is None:
         raise ValueError("RDKit could not parse this SMILES string")
     canonical = Chem.MolToSmiles(mol, canonical=True)
@@ -132,7 +75,6 @@ def predict(query: str) -> dict:
     ad_label = "Inside" if max_sim >= 0.60 else ("Borderline" if max_sim >= 0.40 else "Outside")
     consensus = (svr_px + integrated_px) / 2
     return {
-        "resolved_from": resolved_from,
         "canonical_smiles": canonical,
         "structure_svg": Draw.MolsToGridImage([mol], molsPerRow=1, subImgSize=(430, 300),
                                                 useSVG=True, legends=[canonical]),
@@ -157,6 +99,7 @@ def predict(query: str) -> dict:
             "Lipinski violations": int(desc["lipinski_violations"]),
         },
         "docking": "Not run in instant mode; use screen_library.sh for CFTR pocket docking.",
+        "mutation_assessment": "UNKNOWN — the compound-level QSAR does not establish CFTR-mutation-specific response or chemical mutagenicity. The separate mutation-response model is exploratory (ROC-AUC 0.512) and is not used for this call.",
         "warning": "Computational research prediction only; not evidence of CFTR modulation or clinical benefit.",
     }
 
@@ -172,42 +115,60 @@ h1{margin:0;font-size:clamp(27px,4vw,48px);letter-spacing:-.04em}header p{margin
 main{max-width:1400px;margin:auto;padding:24px;display:grid;grid-template-columns:minmax(430px,1.05fr) minmax(380px,.95fr);gap:22px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 8px 28px #163c2c0d}h2{margin:0 0 14px;font-size:20px}.editor{min-height:420px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:white}label{font-weight:750;display:block;margin:16px 0 6px}textarea{width:100%;min-height:74px;padding:12px;border:1px solid #aebdb5;border-radius:10px;font:14px ui-monospace,monospace;resize:vertical}.actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}button{border:0;border-radius:10px;padding:11px 17px;font-weight:800;cursor:pointer;background:var(--teal);color:white}button.secondary{background:#e5ece7;color:var(--ink)}button:disabled{opacity:.55}.status{min-height:24px;color:var(--muted);margin-top:10px}.hero-results{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metric{background:#eef4ef;border-radius:12px;padding:13px}.metric strong{display:block;font-size:24px}.metric span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}.metric.primary{background:#dff3ec}.metric.accent{background:#eff8c7}.structure{display:grid;place-items:center;min-height:280px;border-bottom:1px solid var(--line);margin-bottom:15px;overflow:auto}.structure svg{max-width:100%;height:auto}.props{display:grid;grid-template-columns:1fr 1fr;gap:7px 18px}.prop{display:flex;justify-content:space-between;border-bottom:1px dotted #ccd7cf;padding:5px 0}.notice{margin-top:14px;padding:11px;border-left:4px solid #d69b19;background:#fff8de;color:#624600}.hidden{display:none}.ad-Inside{color:#087f2b}.ad-Borderline{color:#a56600}.ad-Outside{color:#b3261e}.dockbox{margin-top:15px;padding:14px;border:1px solid var(--line);border-radius:12px}.dockgrid{display:grid;grid-template-columns:1fr auto;gap:6px 14px}.dockimg{width:100%;margin-top:12px;border-radius:10px;background:#000}.downloads a{display:inline-block;margin:7px 10px 0 0;color:var(--teal);font-weight:800}
 @media(max-width:920px){main{grid-template-columns:1fr}.editor{min-height:360px}}@media(max-width:560px){main{padding:12px}.card{padding:14px}.hero-results{grid-template-columns:1fr}.props{grid-template-columns:1fr}header{align-items:start;flex-direction:column}}
 </style></head><body><header><div><h1>CFTR Molecule Designer</h1><p>Sketch chemistry. Estimate CFTR activity and potency. Check model applicability.</p></div><div class="badge">Research use only</div></header>
-<main><section class="card"><h2>1. Design or find a molecule</h2><div id="jsme" class="editor"></div><label for="smiles">SMILES, ChEMBL ID, PubChem CID, or chemical name</label><textarea id="smiles" placeholder="Examples: c1ccccc1, CHEMBL25, CID 2244, or aspirin"></textarea><div class="actions"><button id="predict">Predict CFTR profile</button><button class="secondary" id="example">Load example</button><button class="secondary" id="clear">Clear</button></div><div class="status" id="status">Editor loading…</div></section>
-<section class="card"><h2>2. CFTR prediction</h2><div id="empty"><p>Submit a valid molecule to generate its profile.</p></div><div id="results" class="hidden"><div id="structure" class="structure"></div><div class="hero-results"><div class="metric primary"><span>RBF-SVR pX</span><strong id="svr"></strong><small id="nm"></small></div><div class="metric accent"><span>CFTR class</span><strong id="classcall"></strong><small id="prob"></small><br><small id="call"></small></div><div class="metric"><span>Integrated pX</span><strong id="rf"></strong></div><div class="metric"><span>Consensus pX</span><strong id="consensus"></strong></div></div><h2 style="margin-top:20px">Applicability & properties</h2><p>Domain: <strong id="ad"></strong> · nearest training compound: <strong id="nearest"></strong></p><div id="props" class="props"></div><div class="dockbox"><h2>3. Structural docking</h2><button id="dock">Run docking against 5 CFTR pockets</button><div class="status" id="dockstatus">Longer calculation; starts only when requested.</div><div id="dockresults" class="hidden"><div class="dockgrid" id="dockgrid"></div><div class="downloads" id="downloads"></div><img id="dockimg" class="dockimg hidden" alt="Best docked CFTR receptor–ligand complex"></div></div><div class="notice" id="warning"></div></div></section></main>
+<main><section class="card"><h2>1. Design a molecule</h2><div id="jsme" class="editor"></div><label for="smiles">SMILES</label><textarea id="smiles" placeholder="Draw above or paste a SMILES string"></textarea><div class="actions"><button id="predict">Predict CFTR profile</button><button class="secondary" id="example">Load example</button><button class="secondary" id="clear">Clear</button></div><div class="status" id="status">Editor loading…</div></section>
+<section class="card"><h2>2. CFTR prediction</h2><div id="empty"><p>Submit a valid molecule to generate its profile.</p></div><div id="results" class="hidden"><div id="structure" class="structure"></div><div class="hero-results"><div class="metric primary"><span>RBF-SVR pX</span><strong id="svr"></strong><small id="nm"></small></div><div class="metric accent"><span>CFTR class</span><strong id="classcall"></strong><small id="prob"></small><br><small id="call"></small></div><div class="metric"><span>Integrated pX</span><strong id="rf"></strong></div><div class="metric"><span>Consensus pX</span><strong id="consensus"></strong></div></div><h2 style="margin-top:20px">Applicability & properties</h2><p>Domain: <strong id="ad"></strong> · nearest training compound: <strong id="nearest"></strong></p><div id="props" class="props"></div><div class="notice"><strong>Mutation assessment</strong><br><span id="mutation"></span></div><div class="dockbox"><h2>3. Structural docking</h2><button id="dock">Run docking against 5 CFTR pockets</button><div class="status" id="dockstatus">Longer calculation; starts only when requested.</div><div id="dockresults" class="hidden"><div class="dockgrid" id="dockgrid"></div><div class="downloads" id="downloads"></div><img id="dockimg" class="dockimg hidden" alt="Best docked CFTR receptor–ligand complex"></div></div><div class="notice" id="warning"></div></div></section></main>
 <script>
 let jsmeApplet=null,currentSmiles=''; function jsmeOnLoad(){jsmeApplet=new JSApplet.JSME("jsme","100%","420px",{options:"newlook,star"});document.getElementById('status').textContent="Editor ready";jsmeApplet.setAfterStructureModifiedCallback(()=>document.getElementById('smiles').value=jsmeApplet.smiles())}
 const $=id=>document.getElementById(id); $('example').onclick=()=>{const s='CC(=O)OC1=CC=CC=C1C(=O)O';$('smiles').value=s;if(jsmeApplet)jsmeApplet.readGenericMolecularInput(s)};$('clear').onclick=()=>{$('smiles').value='';if(jsmeApplet)jsmeApplet.reset();$('results').classList.add('hidden');$('empty').classList.remove('hidden')}
-$('predict').onclick=async()=>{let smiles=$('smiles').value.trim()||(jsmeApplet?jsmeApplet.smiles():'');if(!smiles){$('status').textContent='Draw a molecule or enter a SMILES, ChEMBL ID, PubChem CID, or chemical name.';return}$('predict').disabled=true;$('status').textContent='Resolving structure and calculating model predictions…';try{const r=await fetch('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({smiles})});const d=await r.json();if(!r.ok)throw Error(d.error||'Prediction failed');currentSmiles=d.canonical_smiles;$('empty').classList.add('hidden');$('results').classList.remove('hidden');$('structure').innerHTML=d.structure_svg;$('svr').textContent=d.svr_predicted_px;$('nm').textContent='≈ '+d.svr_approx_nM+' nM';$('classcall').textContent=d.activity_class;$('prob').textContent=(100*d.predicted_active_probability).toFixed(1)+'% probability';$('call').textContent=d.activity_call;$('rf').textContent=d.integrated_predicted_px;$('consensus').textContent=d.consensus_predicted_px;$('ad').textContent=d.applicability_domain;$('ad').className='ad-'+d.applicability_domain;$('nearest').textContent=d.nearest_training_compound+' (Tanimoto '+d.nearest_training_similarity+')';$('props').innerHTML=Object.entries(d.properties).map(([k,v])=>`<div class="prop"><span>${k}</span><strong>${v}</strong></div>`).join('');$('warning').textContent=d.warning;$('status').textContent='Prediction complete · resolved from '+d.resolved_from+' · '+d.canonical_smiles}catch(e){$('status').textContent=e.message}finally{$('predict').disabled=false}}
-$('dock').onclick=async()=>{if(!currentSmiles){$('dockstatus').textContent='Run the instant prediction first.';return}$('dock').disabled=true;$('dockresults').classList.add('hidden');$('dockstatus').textContent='Starting docking job…';try{let r=await fetch('/api/dock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({smiles:currentSmiles})});let d=await r.json();if(!r.ok)throw Error(d.error||'Could not start docking');while(true){await new Promise(x=>setTimeout(x,2000));r=await fetch('/api/dock/'+d.job_id);d=await r.json();$('dockstatus').textContent=d.message||d.status;if(d.status==='failed')throw Error(d.error);if(d.status==='complete')break}$('dockresults').classList.remove('hidden');$('dockgrid').innerHTML=d.result.scores.map(x=>`<span>${x.binding_site}</span><strong>${Number(x.best_affinity_kcal_mol).toFixed(3)} kcal/mol</strong>`).join('');$('downloads').innerHTML=`<a href="/artifact/${d.result.best_pose_pdbqt}" target="_blank">Best pose PDBQT</a><a href="/artifact/${d.result.complex_pdb}" target="_blank">Complex PDB</a>`;if(d.result.complex_png){$('dockimg').src='/artifact/'+d.result.complex_png+'?t='+Date.now();$('dockimg').classList.remove('hidden')}$('dockstatus').textContent='Best pocket: '+d.result.best_binding_site+' | '+Number(d.result.best_affinity_kcal_mol).toFixed(3)+' kcal/mol'}catch(e){$('dockstatus').textContent=e.message}finally{$('dock').disabled=false}}
+async function apiJson(url,options){const r=await fetch(url,options);const text=await r.text();let data;try{data=JSON.parse(text)}catch(_){const kind=(r.headers.get('content-type')||'').split(';')[0];const hint=location.protocol==='file:'||location.hostname.endsWith('github.io')?' This Python app needs a running server; GitHub Pages serves static files only.':'';throw Error(`Server returned ${kind||'non-JSON content'} (HTTP ${r.status}) instead of JSON.${hint}`)}if(!r.ok)throw Error(data.error||data.message||`Request failed (HTTP ${r.status})`);return data}
+function artifactUrl(path,download=false){const safe=String(path).split('/').map(encodeURIComponent).join('/');return '/artifact/'+safe+(download?'?download=1':'')}
+$('predict').onclick=async()=>{let smiles=$('smiles').value.trim()||(jsmeApplet?jsmeApplet.smiles():'');if(!smiles){$('status').textContent='Draw or paste a molecule first.';return}$('predict').disabled=true;$('status').textContent='Calculating RDKit features and model predictions…';try{const d=await apiJson('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({smiles})});currentSmiles=d.canonical_smiles;$('empty').classList.add('hidden');$('results').classList.remove('hidden');$('structure').innerHTML=d.structure_svg;$('svr').textContent=d.svr_predicted_px;$('nm').textContent='≈ '+d.svr_approx_nM+' nM';$('classcall').textContent=d.activity_class;$('prob').textContent=(100*d.predicted_active_probability).toFixed(1)+'% probability';$('call').textContent=d.activity_call;$('rf').textContent=d.integrated_predicted_px;$('consensus').textContent=d.consensus_predicted_px;$('ad').textContent=d.applicability_domain;$('ad').className='ad-'+d.applicability_domain;$('nearest').textContent=d.nearest_training_compound+' (Tanimoto '+d.nearest_training_similarity+')';$('props').innerHTML=Object.entries(d.properties).map(([k,v])=>`<div class="prop"><span>${k}</span><strong>${v}</strong></div>`).join('');$('mutation').textContent=d.mutation_assessment;$('warning').textContent=d.warning;$('status').textContent='Prediction complete for '+d.canonical_smiles}catch(e){$('status').textContent=e.message}finally{$('predict').disabled=false}}
+$('dock').onclick=async()=>{if(!currentSmiles){$('dockstatus').textContent='Run the instant prediction first.';return}$('dock').disabled=true;$('dockresults').classList.add('hidden');$('dockimg').classList.add('hidden');$('dockimg').removeAttribute('src');$('dockstatus').textContent='Starting docking job…';try{let d=await apiJson('/api/dock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({smiles:currentSmiles})});while(true){await new Promise(x=>setTimeout(x,2000));d=await apiJson('/api/dock/'+encodeURIComponent(d.job_id));$('dockstatus').textContent=d.message||d.status;if(d.status==='failed')throw Error(d.error||'Docking failed');if(d.status==='complete')break}$('dockresults').classList.remove('hidden');$('dockgrid').innerHTML=d.result.scores.map(x=>`<span>${x.binding_site}</span><strong>${Number(x.best_affinity_kcal_mol).toFixed(3)} kcal/mol</strong>`).join('');const links=[['Best pose PDBQT',d.result.best_pose_pdbqt],['Complex PDB',d.result.complex_pdb],['Docking result JSON',d.result.result_json],['Complex PNG',d.result.complex_png]].filter(x=>x[1]);$('downloads').innerHTML=links.map(([label,path])=>`<a href="${artifactUrl(path,true)}" download>${label}</a>`).join('');if(d.result.complex_png){$('dockimg').onerror=()=>{$('dockimg').classList.add('hidden');$('dockstatus').textContent='Docking completed, but the PNG could not be loaded. Use the download link below.'};$('dockimg').src=artifactUrl(d.result.complex_png)+'?t='+Date.now();$('dockimg').classList.remove('hidden')}$('dockstatus').textContent='Best pocket: '+d.result.best_binding_site+' | '+Number(d.result.best_affinity_kcal_mol).toFixed(3)+' kcal/mol'}catch(e){$('dockstatus').textContent=e.message}finally{$('dock').disabled=false}}
 </script></body></html>'''
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send_bytes(self, payload: bytes, content_type: str, status=200):
+    def send_bytes(self, payload: bytes, content_type: str, status=200, headers=None):
         self.send_response(status); self.send_header("Content-Type", content_type)
+        for name, value in (headers or {}).items(): self.send_header(name, value)
         self.send_header("Content-Length", str(len(payload))); self.end_headers(); self.wfile.write(payload)
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path); path = parsed.path
         if path in ("/", "/index.html"):
             self.send_bytes(HTML.encode(), "text/html; charset=utf-8")
         elif path == "/api/health":
             self.send_bytes(json.dumps({"status": "ok", "models": 3}).encode(), "application/json")
         elif path.startswith("/api/dock/"):
-            job_id = path.rsplit("/", 1)[-1]
+            job_id = unquote(path.rsplit("/", 1)[-1])
             with DOCK_LOCK: job = DOCK_JOBS.get(job_id)
+            if job is None:
+                result_path = ROOT / "results" / "web_docking" / job_id / "result.json"
+                try:
+                    result = json.loads(result_path.read_text())
+                    job = {"job_id": job_id, "status": "complete",
+                           "message": "Docking complete (restored from disk)", "result": result}
+                    with DOCK_LOCK: DOCK_JOBS[job_id] = job
+                except (OSError, json.JSONDecodeError):
+                    pass
             if job is None:
                 self.send_bytes(json.dumps({"error": "Unknown job"}).encode(), "application/json", 404)
             else:
                 self.send_bytes(json.dumps(job).encode(), "application/json")
         elif path.startswith("/artifact/"):
-            rel = path[len("/artifact/"):]
+            rel = unquote(path[len("/artifact/"):])
             candidate = (ROOT / rel).resolve()
             allowed = (ROOT / "results" / "web_docking").resolve()
             if allowed not in candidate.parents or not candidate.is_file():
                 self.send_bytes(b"Not found", "text/plain", 404); return
-            ctype = "image/png" if candidate.suffix == ".png" else "application/octet-stream"
-            self.send_bytes(candidate.read_bytes(), ctype)
+            ctype = {".pdb": "chemical/x-pdb", ".pdbqt": "text/plain; charset=utf-8",
+                     ".json": "application/json"}.get(candidate.suffix.lower())
+            ctype = ctype or mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+            headers = {"Cache-Control": "no-cache"}
+            if parse_qs(parsed.query).get("download") == ["1"]:
+                safe_name = candidate.name.replace('"', '')
+                headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+            self.send_bytes(candidate.read_bytes(), ctype, headers=headers)
         else: self.send_bytes(b"Not found", "text/plain", 404)
 
     def do_POST(self):
@@ -226,6 +187,15 @@ class Handler(BaseHTTPRequestHandler):
                 job_id = "WEB_" + hashlib.sha256(canonical.encode()).hexdigest()[:12].upper()
                 with DOCK_LOCK:
                     existing = DOCK_JOBS.get(job_id)
+                    result_path = ROOT / "results" / "web_docking" / job_id / "result.json"
+                    if not existing and result_path.is_file():
+                        try:
+                            result = json.loads(result_path.read_text())
+                            existing = DOCK_JOBS[job_id] = {
+                                "job_id": job_id, "status": "complete",
+                                "message": "Docking complete (restored from disk)", "result": result}
+                        except (OSError, json.JSONDecodeError):
+                            pass
                     if not existing or existing.get("status") == "failed":
                         DOCK_JOBS[job_id] = {"job_id": job_id, "status": "queued", "message": "Queued"}
                         def worker():
