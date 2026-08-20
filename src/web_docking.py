@@ -64,8 +64,11 @@ def dock_smiles(root: Path, smiles: str, job_id: str, progress=lambda message: N
         dock_args = (vina, receptor, ligand, center, docking.BOX_SIZE_A, out, 4)
         # Newer docking runners accept an explicit one-CPU limit. Continue to
         # work with older deployed copies while pockets still run sequentially.
-        if "cpu" in inspect.signature(docking.dock_one_binary).parameters:
-            result = docking.dock_one_binary(*dock_args, cpu=1)
+        parameters = inspect.signature(docking.dock_one_binary).parameters
+        if "cpu" in parameters:
+            extra = {"cpu": 1}
+            if "num_modes" in parameters: extra["num_modes"] = 1
+            result = docking.dock_one_binary(*dock_args, **extra)
         else:
             result = docking.dock_one_binary(*dock_args)
         return {**result, "binding_site": site, "receptor_used": receptor.name,
