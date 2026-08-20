@@ -7,6 +7,8 @@ Then: http://127.0.0.1:8765
 Research prioritization only. Predictions are not clinical evidence.
 """
 import argparse
+import ctypes
+import gc
 import hashlib
 import importlib.util
 import json
@@ -38,31 +40,51 @@ def load_numbered(path: Path):
 
 
 FEATURES = load_numbered(ROOT / "src" / "09_featurize_chembl_compounds.py")
-MODEL_ERROR = None
-try:
-    SVR = joblib.load(MODELS / "bioactivity_svr_rbf_descriptors_fp.joblib")
-    CLASSIFIER = joblib.load(MODELS / "cftr_activity_classifier.joblib")
-    REGRESSOR = joblib.load(MODELS / "cftr_potency_regressor.joblib")
-except Exception as exc:
-    SVR = CLASSIFIER = REGRESSOR = None
-    MODEL_ERROR = f"Prediction assets are unavailable: {exc}"
-WEB_DOCK = load_numbered(ROOT / "src" / "web_docking.py")
 MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
+WEB_DOCK = load_numbered(ROOT / "src" / "web_docking.py")
 DOCK_JOBS, DOCK_LOCK = {}, threading.Lock()
-
+SVR = CLASSIFIER = REGRESSOR = None
+MODEL_ERROR = None
 TRAIN_FPS, TRAIN_IDS = [], []
-if MODEL_ERROR is None:
+
+
+def load_prediction_assets():
+    global SVR, CLASSIFIER, REGRESSOR, MODEL_ERROR, TRAIN_FPS, TRAIN_IDS
+    if SVR is not None and TRAIN_FPS:
+        return
     try:
+        SVR = joblib.load(MODELS / "bioactivity_svr_rbf_descriptors_fp.joblib")
+        CLASSIFIER = joblib.load(MODELS / "cftr_activity_classifier.joblib")
+        REGRESSOR = joblib.load(MODELS / "cftr_potency_regressor.joblib")
         TRAIN = pd.read_csv(PROCESSED / "chembl_bioactivity_features.csv",
                             usecols=["molecule_chembl_id", "canonical_smiles"])
+        TRAIN_FPS, TRAIN_IDS = [], []
         for row in TRAIN.itertuples(index=False):
             mol = Chem.MolFromSmiles(str(row.canonical_smiles))
             if mol:
                 TRAIN_FPS.append(MORGAN.GetFingerprint(mol)); TRAIN_IDS.append(row.molecule_chembl_id)
         if not TRAIN_FPS:
             raise ValueError("training feature table contains no valid molecules")
+        MODEL_ERROR = None
     except Exception as exc:
+        SVR = CLASSIFIER = REGRESSOR = None
+        TRAIN_FPS, TRAIN_IDS = [], []
         MODEL_ERROR = f"Prediction assets are unavailable: {exc}"
+
+
+def unload_prediction_assets():
+    """Release QSAR memory before launching Vina on a 512-MB service."""
+    global SVR, CLASSIFIER, REGRESSOR, TRAIN_FPS, TRAIN_IDS
+    SVR = CLASSIFIER = REGRESSOR = None
+    TRAIN_FPS, TRAIN_IDS = [], []
+    gc.collect()
+    try:
+        ctypes.CDLL(None).malloc_trim(0)
+    except (AttributeError, OSError):
+        pass
+
+
+load_prediction_assets()
 
 
 def model_frame(desc: dict, columns: list[str]) -> pd.DataFrame:
@@ -92,6 +114,8 @@ def json_safe(value):
 
 
 def predict(smiles: str) -> dict:
+    if SVR is None:
+        load_prediction_assets()
     if MODEL_ERROR:
         raise RuntimeError(MODEL_ERROR + ". Run the training pipeline or deploy the generated models and processed feature table.")
     mol = Chem.MolFromSmiles(smiles.strip())
@@ -214,7 +238,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/health":
             status = 200 if MODEL_ERROR is None else 503
             payload = {"status": "ok" if status == 200 else "degraded",
-                       "models": 3 if status == 200 else 0}
+                       "models": 3 if SVR is not None else 0}
             if MODEL_ERROR: payload["error"] = MODEL_ERROR
             self.send_json(payload, status)
         elif path.startswith("/api/dock/"):
@@ -282,6 +306,9 @@ class Handler(BaseHTTPRequestHandler):
                                     DOCK_JOBS[job_id].update(status="running", message=message)
                             try:
                                 energy_only = os.environ.get("CFTR_DOCK_ENERGY_ONLY", "1").lower() not in {"0", "false", "no"}
+                                if energy_only:
+                                    update("Freeing QSAR memory before binding-energy calculation")
+                                    unload_prediction_assets()
                                 result = WEB_DOCK.dock_smiles(ROOT, canonical, job_id, update,
                                                               energy_only=energy_only)
                                 with DOCK_LOCK:
