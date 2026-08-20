@@ -1,4 +1,4 @@
-# CFTR Modulator Design
+# CFTR Modulator Predictor
 
 An end-to-end research pipeline for prioritizing small molecules against the
 cystic fibrosis transmembrane conductance regulator (CFTR). The project combines
