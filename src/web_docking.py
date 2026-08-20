@@ -2,11 +2,25 @@
 """Single-molecule, five-pocket CFTR docking service used by app.py."""
 import importlib.util
 import json
+import math
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
+
+
+def strict_json_value(value):
+    """Return values that JSON.parse can consume without NaN/Infinity extensions."""
+    if isinstance(value, dict):
+        return {str(key): strict_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [strict_json_value(item) for item in value]
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if hasattr(value, "item"):
+        return strict_json_value(value.item())
+    return value
 
 
 def load_numbered(name, path):
@@ -83,5 +97,6 @@ def dock_smiles(root: Path, smiles: str, job_id: str, progress=lambda message: N
         "result_json": str((job_dir / "result.json").relative_to(root)),
         "warning": "Docking is a computational hypothesis and requires pose review and experimental confirmation.",
     }
-    (job_dir / "result.json").write_text(json.dumps(result, indent=2))
+    result = strict_json_value(result)
+    (job_dir / "result.json").write_text(json.dumps(result, indent=2, allow_nan=False))
     return result
