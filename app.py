@@ -141,7 +141,7 @@ def predict(smiles: str) -> dict:
 
 
 HTML = r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CFTR Molecule Predictor</title>
+<title>CFTR Molecule Designer</title>
 <script type="text/javascript" src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.1/3Dmol-min.js"></script>
 <style>
@@ -153,7 +153,7 @@ main{max-width:1400px;margin:auto;padding:24px;display:grid;grid-template-column
 @media(max-width:920px){main{grid-template-columns:1fr}.editor{min-height:360px}}@media(max-width:560px){main{padding:12px}.card{padding:14px}.hero-results{grid-template-columns:1fr}.props{grid-template-columns:1fr}header{align-items:start;flex-direction:column}}
 </style></head><body><header><div><h1>CFTR Molecule Designer</h1><p>Sketch chemistry. Estimate CFTR activity and potency. Check model applicability.</p></div><div class="badge">Research use only</div></header>
 <main><section class="card"><h2>1. Design a molecule</h2><div id="jsme" class="editor"></div><label for="smiles">SMILES</label><textarea id="smiles" placeholder="Draw above or paste a SMILES string"></textarea><div class="actions"><button id="predict">Predict CFTR profile</button><button class="secondary" id="example">Load example</button><button class="secondary" id="clear">Clear</button></div><div class="status" id="status">Editor loading…</div></section>
-<section class="card"><h2>2. CFTR prediction</h2><div id="empty"><p>Submit a valid molecule to generate its profile.</p></div><div id="results" class="hidden"><div id="structure" class="structure"></div><div class="hero-results"><div class="metric primary"><span>RBF-SVR pX</span><strong id="svr"></strong><small id="nm"></small></div><div class="metric accent"><span>CFTR class</span><strong id="classcall"></strong><small id="prob"></small><br><small id="call"></small></div><div class="metric"><span>Integrated pX</span><strong id="rf"></strong></div><div class="metric"><span>Consensus pX</span><strong id="consensus"></strong></div></div><h2 style="margin-top:20px">Applicability & properties</h2><p>Domain: <strong id="ad"></strong> · nearest training compound: <strong id="nearest"></strong></p><div id="props" class="props"></div><div class="notice"><strong>Mutation assessment</strong><br><span id="mutation"></span></div><div class="dockbox"><h2>3. Structural docking</h2><button id="dock">Run docking against 5 CFTR pockets</button><div class="status" id="dockstatus">Longer calculation; starts only when requested.</div><div id="dockresults" class="hidden"><div class="dockgrid" id="dockgrid"></div><div class="downloads" id="downloads"></div><div id="dockviewer" class="dockviewer hidden" aria-label="Interactive docked CFTR complex"></div><img id="dockimg" class="dockimg hidden" alt="Rendered docked CFTR receptor–ligand complex"></div></div><div class="notice" id="warning"></div></div></section></main>
+<section class="card"><h2>2. CFTR prediction</h2><div id="empty"><p>Submit a valid molecule to generate its profile.</p></div><div id="results" class="hidden"><div id="structure" class="structure"></div><div class="hero-results"><div class="metric primary"><span>RBF-SVR pX</span><strong id="svr"></strong><small id="nm"></small></div><div class="metric accent"><span>CFTR class</span><strong id="classcall"></strong><small id="prob"></small><br><small id="call"></small></div><div class="metric"><span>Integrated pX</span><strong id="rf"></strong></div><div class="metric"><span>Consensus pX</span><strong id="consensus"></strong></div></div><h2 style="margin-top:20px">Applicability & properties</h2><p>Domain: <strong id="ad"></strong> · nearest training compound: <strong id="nearest"></strong></p><div id="props" class="props"></div><div class="notice"><strong>Mutation assessment</strong><br><span id="mutation"></span></div><div class="dockbox"><h2>3. Binding free energy</h2><button id="dock">Calculate binding energies</button><div class="status" id="dockstatus">Low-memory mode; pockets run one at a time.</div><div id="dockresults" class="hidden"><div class="dockgrid" id="dockgrid"></div><div class="downloads" id="downloads"></div><div id="dockviewer" class="dockviewer hidden" aria-label="Interactive docked CFTR complex"></div><img id="dockimg" class="dockimg hidden" alt="Rendered docked CFTR receptor–ligand complex"></div></div><div class="notice" id="warning"></div></div></section></main>
 <script>
 let jsmeApplet=null,currentSmiles=''; function jsmeOnLoad(){jsmeApplet=new JSApplet.JSME("jsme","100%","420px",{options:"newlook,star"});document.getElementById('status').textContent="Editor ready";jsmeApplet.setAfterStructureModifiedCallback(()=>document.getElementById('smiles').value=jsmeApplet.smiles())}
 const $=id=>document.getElementById(id); $('example').onclick=()=>{const s='CC(=O)OC1=CC=CC=C1C(=O)O';$('smiles').value=s;if(jsmeApplet)jsmeApplet.readGenericMolecularInput(s)};$('clear').onclick=()=>{$('smiles').value='';if(jsmeApplet)jsmeApplet.reset();$('results').classList.add('hidden');$('empty').classList.remove('hidden')}
@@ -183,7 +183,7 @@ $('dock').onclick=async()=>{
     $('dockgrid').innerHTML=d.result.scores.map(x=>`<span>${x.binding_site}</span><strong>${Number(x.best_affinity_kcal_mol).toFixed(3)} kcal/mol</strong>`).join('');
     const links=[['Best pose PDBQT',d.result.best_pose_pdbqt],['Complex PDB',d.result.complex_pdb],['Docking result JSON',d.result.result_json],['Complex PNG',d.result.complex_png]].filter(x=>x[1]);
     $('downloads').innerHTML=links.map(([label,path])=>`<a href="${artifactUrl(path,true)}" download>${label}</a>`).join('');
-    let viewerError='';try{await renderDockedComplex(d.result.complex_pdb)}catch(e){viewerError=e.message}
+    let viewerError='';if(d.result.complex_pdb){try{await renderDockedComplex(d.result.complex_pdb)}catch(e){viewerError=e.message}}
     if(d.result.complex_png){$('dockimg').onerror=()=>{$('dockimg').classList.add('hidden')};$('dockimg').src=artifactUrl(d.result.complex_png)+'?t='+Date.now();$('dockimg').classList.remove('hidden')}
     $('dockstatus').textContent='Best pocket: '+d.result.best_binding_site+' | '+Number(d.result.best_affinity_kcal_mol).toFixed(3)+' kcal/mol'+(viewerError?' — '+viewerError:'');
   }catch(e){$('dockstatus').textContent=e.message}finally{$('dock').disabled=false}
@@ -281,7 +281,9 @@ class Handler(BaseHTTPRequestHandler):
                                 with DOCK_LOCK:
                                     DOCK_JOBS[job_id].update(status="running", message=message)
                             try:
-                                result = WEB_DOCK.dock_smiles(ROOT, canonical, job_id, update)
+                                energy_only = os.environ.get("CFTR_DOCK_ENERGY_ONLY", "1").lower() not in {"0", "false", "no"}
+                                result = WEB_DOCK.dock_smiles(ROOT, canonical, job_id, update,
+                                                              energy_only=energy_only)
                                 with DOCK_LOCK:
                                     DOCK_JOBS[job_id].update(status="complete", message="Docking complete", result=result)
                             except Exception as exc:
